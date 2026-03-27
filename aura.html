@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AURA</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d1a;display:flex;justify-content:center;align-items:center;min-height:100vh;font-family:sans-serif}
+#device{background:linear-gradient(160deg,#d8cce8 0%,#c0b0d8 50%,#b0a0c8 100%);border-radius:28px 28px 48px 48px;padding:22px 24px 36px 24px;box-shadow:inset 0 3px 6px rgba(255,255,255,.55),inset 0 -5px 10px rgba(0,0,0,.35),0 12px 40px rgba(0,0,0,.7);display:flex;flex-direction:column;align-items:center;gap:14px}
+#label{font-size:11px;letter-spacing:3px;color:#7060a0;text-transform:uppercase;font-weight:700;margin-bottom:-6px}
+#bezel{background:#141018;border-radius:8px;padding:8px;box-shadow:inset 0 3px 8px rgba(0,0,0,.9),inset 0 0 0 2px #2a2030}
+canvas{display:block;width:480px;height:432px;image-rendering:pixelated;image-rendering:crisp-edges}
+#controls{display:flex;justify-content:space-between;align-items:center;width:100%;padding:0 4px}
+#dpad{width:48px;height:48px;position:relative}
+#dpad::before{content:'';position:absolute;top:33%;left:0;width:100%;height:34%;background:#a898c0;border-radius:4px;box-shadow:inset 0 2px 3px rgba(0,0,0,.4)}
+#dpad::after{content:'';position:absolute;left:33%;top:0;width:34%;height:100%;background:#a898c0;border-radius:4px;box-shadow:inset 0 2px 3px rgba(0,0,0,.4)}
+#dpad-center{position:absolute;top:33%;left:33%;width:34%;height:34%;background:#9888b8;border-radius:2px;z-index:1}
+#buttons{display:flex;gap:8px;align-items:center;flex-direction:column}
+#btn-row{display:flex;gap:10px;align-items:center}
+.btn{width:20px;height:20px;border-radius:50%;box-shadow:0 4px 0 rgba(0,0,0,.4),inset 0 1px 3px rgba(255,255,255,.3)}
+.btn-a{background:radial-gradient(circle at 40% 35%,#f080a0,#c05070)}
+.btn-b{background:radial-gradient(circle at 40% 35%,#80a0f0,#4060c0)}
+#btn-labels{display:flex;gap:14px;font-size:8px;color:#8070a0;letter-spacing:1px}
+#speaker{display:flex;gap:4px;margin-top:4px}
+.sdot{width:5px;height:5px;border-radius:50%;background:#9888b8;box-shadow:inset 0 1px 2px rgba(0,0,0,.5)}
+#hint{font-size:9px;color:#7060a0;letter-spacing:1px;text-align:center}
+</style>
+</head>
+<body>
+<div id="device">
+  <div id="label">AURA DEVICE</div>
+  <div id="bezel"><canvas id="game" width="160" height="144"></canvas></div>
+  <div id="controls">
+    <div id="dpad"><div id="dpad-center"></div></div>
+    <div id="speaker"><div class="sdot"></div><div class="sdot"></div><div class="sdot"></div><div class="sdot"></div><div class="sdot"></div></div>
+    <div id="buttons">
+      <div id="btn-row"><div class="btn btn-b"></div><div class="btn btn-a"></div></div>
+      <div id="btn-labels"><span>B</span><span>A</span></div>
+    </div>
+  </div>
+  <div id="hint">← → MOVE &nbsp; SPACE JUMP</div>
+</div>
+
+<script>
+// ─── A: CONSTANTS ────────────────────────────────────────────────────────────
+const W = 160, H = 144;
+const GROUND_Y = 126;
+const PLAYER_W = 12, PLAYER_H = 20;
+const GRAVITY = 0.38, JUMP_FORCE = -5.6, WALK_SPEED = 1.2, FRICTION = 0.72;
+const MAX_LEVELS = 8;
+
+const LEVEL_PAL = [
+  {sky:'#0e0e2e',skyH:'#1a1a40',gTop:'#3a5a3a',gFill:'#2a4030',cFar:'#080818',cNear:'#10102a',name:'TWILIGHT'},
+  {sky:'#2a0e0e',skyH:'#3e1818',gTop:'#5a3a3a',gFill:'#402828',cFar:'#18080a',cNear:'#2a1010',name:'BLOODMOON'},
+  {sky:'#0a1e0a',skyH:'#102810',gTop:'#2a5030',gFill:'#1a3824',cFar:'#060e06',cNear:'#0e1e0e',name:'HAUNTED'},
+  {sky:'#180e2e',skyH:'#241440',gTop:'#3a2a5a',gFill:'#281e42',cFar:'#0c0818',cNear:'#18102a',name:'CURSED'},
+];
+
+// ─── B: AUDIO ─────────────────────────────────────────────────────────────────
+let audioCtx = null, nextNoteTime = 0, melodyIdx = 0, bassIdx = 0;
+const NOTE = {A3:220,B3:246.94,C4:261.63,D4:293.66,E4:329.63,G4:392,A4:440,C5:523.25,D5:587.33,E5:659.25,G5:783.99,A5:880,R:0};
+const MELODY = [
+  [NOTE.A4,2],[NOTE.C5,1],[NOTE.D5,1],[NOTE.E5,2],[NOTE.D5,1],[NOTE.C5,1],
+  [NOTE.A4,2],[NOTE.G4,2],[NOTE.E4,2],[NOTE.G4,1],[NOTE.A4,1],
+  [NOTE.C5,2],[NOTE.D5,2],[NOTE.E5,2],[NOTE.C5,2],[NOTE.A4,4],
+];
+const BASS = [
+  [NOTE.A3,4],[NOTE.C4,4],[NOTE.E4,4],[NOTE.G4,4],[NOTE.E4,4],[NOTE.D4,4],[NOTE.C4,4],[NOTE.A3,4],
+];
+const S16 = 60/120/4;
+
+function initAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+  nextNoteTime = audioCtx.currentTime + 0.1;
+}
+
+function tone(freq,type,t0,dur,vol=0.12){
+  if(!audioCtx||freq===0) return;
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  o.type=type; o.frequency.setValueAtTime(freq,t0);
+  g.gain.setValueAtTime(vol,t0);
+  g.gain.exponentialRampToValueAtTime(0.001,t0+dur);
+  o.start(t0); o.stop(t0+dur+0.02);
+}
+
+function scheduleMusicChunk(){
+  if(!audioCtx) return;
+  while(nextNoteTime < audioCtx.currentTime+0.5){
+    const [mf,md]=MELODY[melodyIdx%MELODY.length];
+    const [bf,bd]=BASS[bassIdx%BASS.length];
+    tone(mf,'square',nextNoteTime,md*S16-0.02,0.1);
+    tone(bf,'triangle',nextNoteTime,bd*S16-0.02,0.06);
+    nextNoteTime+=md*S16;
+    melodyIdx++;
+    if(melodyIdx%2===0) bassIdx++;
+  }
+}
+
+function sfxJump(){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+  o.connect(g);g.connect(audioCtx.destination);
+  o.type='square';
+  o.frequency.setValueAtTime(180,audioCtx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(520,audioCtx.currentTime+0.12);
+  g.gain.setValueAtTime(0.18,audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+0.15);
+  o.start(); o.stop(audioCtx.currentTime+0.18);
+}
+
+function sfxTransition(dir){
+  if(!audioCtx) return;
+  const ns=dir==='right'?[NOTE.A5,NOTE.E5,NOTE.C5,NOTE.A4]:[NOTE.A4,NOTE.C5,NOTE.E5,NOTE.A5];
+  ns.forEach((f,i)=>tone(f,'triangle',audioCtx.currentTime+i*0.07,0.1,0.1));
+}
+
+// ─── C: PIXEL FONTS ───────────────────────────────────────────────────────────
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+
+// 7×9 title glyphs (bitmask rows)
+const TITLE_GLYPHS={
+  A:[0b0011100,0b0100010,0b1000001,0b1000001,0b1111111,0b1000001,0b1000001,0b1000001,0b0000000],
+  U:[0b1000001,0b1000001,0b1000001,0b1000001,0b1000001,0b1000001,0b0100010,0b0011100,0b0000000],
+  R:[0b1111110,0b1000001,0b1000001,0b1111110,0b1001000,0b1000100,0b1000010,0b1000001,0b0000000],
+};
+function drawTitleChar(ch,x,y,col){
+  const g=TITLE_GLYPHS[ch]; if(!g) return;
+  ctx.fillStyle=col;
+  for(let r=0;r<9;r++) for(let c=0;c<7;c++)
+    if(g[r]&(1<<(6-c))) ctx.fillRect(x+c,y+r,1,1);
+}
+function drawTitle(x,y,col){
+  ['A','U','R','A'].forEach((ch,i)=>drawTitleChar(ch,x+i*9,y,col));
+}
+
+// 4×5 small font
+const SF={
+  '0':[0b1110,0b1010,0b1010,0b1010,0b1110],
+  '1':[0b0110,0b0010,0b0010,0b0010,0b0111],
+  '2':[0b1110,0b0010,0b0110,0b1000,0b1110],
+  '3':[0b1110,0b0010,0b0110,0b0010,0b1110],
+  '4':[0b1010,0b1010,0b1110,0b0010,0b0010],
+  '5':[0b1110,0b1000,0b1110,0b0010,0b1110],
+  '6':[0b1110,0b1000,0b1110,0b1010,0b1110],
+  '7':[0b1110,0b0010,0b0100,0b0100,0b0100],
+  '8':[0b1110,0b1010,0b1110,0b1010,0b1110],
+  '9':[0b1110,0b1010,0b1110,0b0010,0b1110],
+  'L':[0b1000,0b1000,0b1000,0b1000,0b1111],
+  'V':[0b1001,0b1001,0b1001,0b0110,0b0100],
+  'A':[0b0110,0b1001,0b1111,0b1001,0b1001],
+  'U':[0b1001,0b1001,0b1001,0b1001,0b0110],
+  'R':[0b1110,0b1001,0b1110,0b1100,0b1010],
+  'P':[0b1110,0b1001,0b1110,0b1000,0b1000],
+  'E':[0b1111,0b1000,0b1110,0b1000,0b1111],
+  'S':[0b0111,0b1000,0b0110,0b0001,0b1110],
+  'Y':[0b1001,0b1001,0b0110,0b0010,0b0010],
+  'K':[0b1001,0b1010,0b1100,0b1010,0b1001],
+  'N':[0b1001,0b1101,0b1011,0b1001,0b1001],
+  'T':[0b1111,0b0100,0b0100,0b0100,0b0100],
+  'H':[0b1001,0b1001,0b1111,0b1001,0b1001],
+  'I':[0b1110,0b0100,0b0100,0b0100,0b1110],
+  'G':[0b0110,0b1000,0b1011,0b1001,0b0110],
+  'W':[0b1001,0b1001,0b1011,0b1101,0b1001],
+  'F':[0b1111,0b1000,0b1110,0b1000,0b1000],
+  'C':[0b0110,0b1000,0b1000,0b1000,0b0110],
+  'M':[0b1001,0b1111,0b1111,0b1001,0b1001],
+  'O':[0b0110,0b1001,0b1001,0b1001,0b0110],
+  'B':[0b1110,0b1001,0b1110,0b1001,0b1110],
+  'D':[0b1110,0b1001,0b1001,0b1001,0b1110],
+  'X':[0b1001,0b0110,0b0100,0b0110,0b1001],
+  ' ':[0b0000,0b0000,0b0000,0b0000,0b0000],
+  ':':[0b0000,0b0100,0b0000,0b0100,0b0000],
+  '-':[0b0000,0b0000,0b1110,0b0000,0b0000],
+};
+function drawText(txt,x,y,col){
+  ctx.fillStyle=col;
+  let cx=x;
+  for(const ch of txt.toUpperCase()){
+    const g=SF[ch]; if(g){
+      for(let r=0;r<5;r++) for(let c=0;c<4;c++)
+        if(g[r]&(1<<(3-c))) ctx.fillRect(cx+c,y+r,1,1);
+    }
+    cx+=5;
+  }
+}
+
+// ─── D: SPRITES ───────────────────────────────────────────────────────────────
+const T=null;
+// Color aliases
+const SK='#f0c8a0',SD='#d4a070',HA='#1a1a2e',HS='#2d2d4e',
+      EG='#50d070',EW='#ffffff',BL='#e87060',
+      AB='#8090a8',AE='#c0d0e0',AD='#404858',
+      SW='#d0e8f8',SG='#c0a820',HP='#f060a0',
+      TK='#4060c0',TD='#2848a0',BT='#3a2818',BE='#5a4028';
+
+// idle frame 0
+const PI0=[
+  [T,  T,  T,  HA, HA, HA, HA, HA, HA, T,  T,  T ],
+  [T,  T,  HA, HA, HA, HS, HS, HA, HA, HA, T,  T ],
+  [T,  HA, HA, HS, HA, HA, HA, HA, HS, HA, HA, T ],
+  [T,  HA, HA, SK, SK, SK, SK, SK, SK, HA, HA, T ],
+  [T,  HA, SK, SK, EW, EG, SK, EG, EW, SK, HA, T ],
+  [T,  T,  SK, BL, SK, SK, SK, SK, BL, SK, T,  T ],
+  [T,  T,  SK, SK, SK, SK, SK, SK, SK, SK, T,  T ],
+  [T,  T,  T,  SK, SD, SK, SK, SD, SK, T,  T,  T ],
+  [T,  T,  T,  SK, T,  T,  T,  T,  SK, T,  T,  T ],
+  [T,  AB, AB, AB, AB, AE, AE, AB, AB, AB, T,  T ],
+  [T,  AE, AB, AE, AB, AB, AB, AB, AE, AB, T,  T ],
+  [AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, T ],
+  [AB, AD, AB, AE, AB, AB, AB, AE, AB, AD, AB, T ],
+  [AB, T,  TK, TK, TK, TK, TK, TK, T,  AB, T,  T ],
+  [T,  T,  TK, SK, SK, TK, TK, SK, SK, TK, T,  T ],
+  [T,  SW, SW, TK, SG, SG, T,  T,  T,  T,  T,  T ],
+  [T,  SW, HP, SW, T,  T,  TD, TD, TD, T,  T,  T ],
+  [T,  T,  SW, T,  T,  T,  TK, TD, TK, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  BT, BT, BT, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  BT, BE, BT, T,  T,  T ],
+];
+// idle frame 1 — torso shift down 1px (breathing)
+const PI1=[
+  [T,  T,  T,  HA, HA, HA, HA, HA, HA, T,  T,  T ],
+  [T,  T,  HA, HA, HA, HS, HS, HA, HA, HA, T,  T ],
+  [T,  HA, HA, HS, HA, HA, HA, HA, HS, HA, HA, T ],
+  [T,  HA, HA, SK, SK, SK, SK, SK, SK, HA, HA, T ],
+  [T,  HA, SK, SK, EW, EG, SK, EG, EW, SK, HA, T ],
+  [T,  T,  SK, BL, SK, SK, SK, SK, BL, SK, T,  T ],
+  [T,  T,  SK, SK, SK, SK, SK, SK, SK, SK, T,  T ],
+  [T,  T,  T,  SK, SD, SK, SK, SD, SK, T,  T,  T ],
+  [T,  T,  T,  SK, T,  T,  T,  T,  SK, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  T,  T,  T,  T,  T,  T ],
+  [T,  AB, AB, AB, AB, AE, AE, AB, AB, AB, T,  T ],
+  [T,  AE, AB, AE, AB, AB, AB, AB, AE, AB, T,  T ],
+  [AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, T ],
+  [AB, AD, AB, AE, AB, AB, AB, AE, AB, AD, AB, T ],
+  [AB, T,  TK, TK, TK, TK, TK, TK, T,  AB, T,  T ],
+  [T,  SW, SW, TK, SG, SG, T,  T,  T,  T,  T,  T ],
+  [T,  SW, HP, SW, T,  T,  TD, TD, TD, T,  T,  T ],
+  [T,  T,  SW, T,  T,  T,  TK, TD, TK, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  BT, BT, BT, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  BT, BE, BT, T,  T,  T ],
+];
+
+// walk frame 0 — left leg forward
+const PW0=[
+  [T,  T,  T,  HA, HA, HA, HA, HA, HA, T,  T,  T ],
+  [T,  T,  HA, HA, HA, HS, HS, HA, HA, HA, T,  T ],
+  [T,  HA, HA, HS, HA, HA, HA, HA, HS, HA, HA, T ],
+  [T,  HA, HA, SK, SK, SK, SK, SK, SK, HA, HA, T ],
+  [T,  HA, SK, SK, EW, EG, SK, EG, EW, SK, HA, T ],
+  [T,  T,  SK, BL, SK, SK, SK, SK, BL, SK, T,  T ],
+  [T,  T,  SK, SK, SK, SK, SK, SK, SK, SK, T,  T ],
+  [T,  T,  T,  SK, SD, SK, SK, SD, SK, T,  T,  T ],
+  [T,  T,  T,  SK, T,  T,  T,  T,  SK, T,  T,  T ],
+  [T,  AB, AB, AB, AB, AE, AE, AB, AB, AB, T,  T ],
+  [T,  AE, AB, AE, AB, AB, AB, AB, AE, AB, T,  T ],
+  [AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, T ],
+  [AB, AD, AB, AE, AB, AB, AB, AE, AB, AD, AB, T ],
+  [AB, T,  TK, TK, TK, TK, TK, TK, T,  AB, T,  T ],
+  [T,  T,  TK, SK, SK, TK, TK, SK, SK, TK, T,  T ],
+  [T,  SW, SW, TK, SG, SG, T,  T,  T,  T,  T,  T ],
+  [T,  SW, HP, SW, T,  T,  TD, TD, T,  T,  T,  T ],
+  [T,  T,  SW, T,  T,  T,  BT, T,  TD, T,  T,  T ],
+  [T,  T,  T,  T,  T,  BT, BT, T,  BT, T,  T,  T ],
+  [T,  T,  T,  T,  T,  BT, BE, T,  T,  T,  T,  T ],
+];
+// walk frame 1 — upright mid stride
+const PW1=PI0;
+// walk frame 2 — right leg forward (mirror positions)
+const PW2=[
+  [T,  T,  T,  HA, HA, HA, HA, HA, HA, T,  T,  T ],
+  [T,  T,  HA, HA, HA, HS, HS, HA, HA, HA, T,  T ],
+  [T,  HA, HA, HS, HA, HA, HA, HA, HS, HA, HA, T ],
+  [T,  HA, HA, SK, SK, SK, SK, SK, SK, HA, HA, T ],
+  [T,  HA, SK, SK, EW, EG, SK, EG, EW, SK, HA, T ],
+  [T,  T,  SK, BL, SK, SK, SK, SK, BL, SK, T,  T ],
+  [T,  T,  SK, SK, SK, SK, SK, SK, SK, SK, T,  T ],
+  [T,  T,  T,  SK, SD, SK, SK, SD, SK, T,  T,  T ],
+  [T,  T,  T,  SK, T,  T,  T,  T,  SK, T,  T,  T ],
+  [T,  AB, AB, AB, AB, AE, AE, AB, AB, AB, T,  T ],
+  [T,  AE, AB, AE, AB, AB, AB, AB, AE, AB, T,  T ],
+  [AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, T ],
+  [AB, AD, AB, AE, AB, AB, AB, AE, AB, AD, AB, T ],
+  [AB, T,  TK, TK, TK, TK, TK, TK, T,  AB, T,  T ],
+  [T,  T,  TK, SK, SK, TK, TK, SK, SK, TK, T,  T ],
+  [T,  SW, SW, TK, SG, SG, T,  T,  T,  T,  T,  T ],
+  [T,  SW, HP, SW, T,  T,  T,  TD, TD, T,  T,  T ],
+  [T,  T,  SW, T,  T,  T,  TD, T,  BT, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  BT, T,  BT, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  T,  T,  BE, T,  T,  T ],
+];
+const PW3=PI0;
+
+// jump frame
+const PJ0=[
+  [T,  T,  T,  HA, HA, HA, HA, HA, HA, T,  T,  T ],
+  [T,  T,  HA, HA, HA, HS, HS, HA, HA, HA, T,  T ],
+  [T,  HA, HA, HS, HA, HA, HA, HA, HS, HA, HA, T ],
+  [T,  HA, HA, SK, SK, SK, SK, SK, SK, HA, HA, T ],
+  [T,  HA, SK, SK, EW, EG, SK, EG, EW, SK, HA, T ],
+  [T,  T,  SK, BL, SK, SK, SK, SK, BL, SK, T,  T ],
+  [T,  T,  SK, SK, SK, SK, SK, SK, SK, SK, T,  T ],
+  [T,  T,  T,  SK, SD, SK, SK, SD, SK, T,  T,  T ],
+  [T,  T,  T,  SK, T,  T,  T,  T,  SK, T,  T,  T ],
+  [T,  AB, AB, AB, AB, AE, AE, AB, AB, AB, T,  T ],
+  [T,  AE, AB, AE, AB, AB, AB, AB, AE, AB, T,  T ],
+  [AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, AB, T ],
+  [AB, AD, AB, AE, AB, AB, AB, AE, AB, AD, AB, T ],
+  [AB, T,  TK, TK, TK, TK, TK, TK, T,  AB, T,  T ],
+  [T,  SW, SW, TK, SK, SK, TK, SK, SK, TK, T,  T ],
+  [T,  SW, HP, SW, SG, SG, T,  T,  T,  T,  T,  T ],
+  [T,  T,  SW, T,  T,  T,  BT, T,  BT, T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  T,  BT, T,  T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  T,  T,  T,  T,  T,  T ],
+  [T,  T,  T,  T,  T,  T,  T,  T,  T,  T,  T,  T ],
+];
+
+const ANIM_IDLE  ={frames:[PI0,PI1],fps:4};
+const ANIM_WALK  ={frames:[PW0,PW1,PW2,PW3],fps:8};
+const ANIM_JUMP  ={frames:[PJ0],fps:4};
+
+// Bat sprites
+const BB='#140a24', BW='#c0a0e0', BR='#ff3030';
+const BAT0=[
+  [T,  BB, T,  BB, BB, T,  BB, T ],
+  [BB, BW, BB, BW, BW, BB, BW, BB],
+  [BB, BB, BB, BB, BB, BB, BB, BB],
+  [T,  BB, BR, BB, BB, BR, BB, T ],
+  [T,  T,  BB, BB, BB, BB, T,  T ],
+  [T,  T,  T,  BB, BB, T,  T,  T ],
+];
+const BAT1=[
+  [T,  T,  T,  BB, BB, T,  T,  T ],
+  [T,  BB, BB, BW, BW, BB, BB, T ],
+  [BB, BW, BB, BB, BB, BB, BW, BB],
+  [T,  BB, BR, BB, BB, BR, BB, T ],
+  [T,  T,  BB, T,  T,  BB, T,  T ],
+  [T,  T,  T,  T,  T,  T,  T,  T ],
+];
+
+function drawSprite(frame,x,y){
+  const xi=Math.round(x), yi=Math.round(y);
+  for(let r=0;r<frame.length;r++){
+    for(let c=0;c<frame[r].length;c++){
+      const col=frame[r][c];
+      if(col){ctx.fillStyle=col;ctx.fillRect(xi+c,yi+r,1,1);}
+    }
+  }
+}
+function drawSpriteFlip(frame,x,y,w){
+  ctx.save();
+  ctx.translate(Math.round(x)+w,Math.round(y));
+  ctx.scale(-1,1);
+  drawSprite(frame,0,0);
+  ctx.restore();
+}
+
+// ─── E: BACKGROUND ────────────────────────────────────────────────────────────
+const bats=[
+  {x:30, y:18, vx:0.28, frame:0, timer:0},
+  {x:110,y:12, vx:-0.35,frame:1, timer:12},
+  {x:72, y:26, vx:0.2,  frame:0, timer:6},
+];
+
+function updateBats(dt){
+  for(const b of bats){
+    b.x+=b.vx;
+    if(b.x>168) b.x=-8;
+    if(b.x<-8)  b.x=168;
+    b.timer+=dt;
+    if(b.timer>220){b.timer=0;b.frame=1-b.frame;}
+  }
+}
+
+function drawCastle(pal, offX){
+  // far towers
+  ctx.fillStyle=pal.cFar;
+  const towers=[[offX+18,60,10,68],[offX+28,72,26,56],[offX+40,50,8,78],[offX+54,68,22,60],[offX+76,56,10,72]];
+  for(const [tx,ty,tw,th] of towers){
+    ctx.fillRect(tx,ty,tw,th);
+    // battlements
+    ctx.fillStyle=pal.sky;
+    for(let bx=tx;bx<tx+tw;bx+=4){ctx.fillRect(bx,ty,2,3);}
+    ctx.fillStyle=pal.cFar;
+  }
+  // near towers (slightly lighter)
+  ctx.fillStyle=pal.cNear;
+  const near=[[offX+5,80,14,64],[offX+35,85,20,59],[offX+68,78,16,66],[offX+100,82,12,62]];
+  for(const [tx,ty,tw,th] of near){
+    ctx.fillRect(tx,ty,tw,th);
+    ctx.fillStyle=pal.sky;
+    for(let bx=tx;bx<tx+tw;bx+=4){ctx.fillRect(bx,ty,2,3);}
+    ctx.fillStyle=pal.cNear;
+  }
+}
+
+function drawGround(pal){
+  ctx.fillStyle=pal.gTop;
+  ctx.fillRect(0,GROUND_Y,W,3);
+  ctx.fillStyle=pal.gFill;
+  ctx.fillRect(0,GROUND_Y+3,W,H-GROUND_Y-3);
+  // tile grout
+  ctx.fillStyle=pal.cFar;
+  for(let tx=0;tx<W;tx+=16) ctx.fillRect(tx,GROUND_Y+3,1,6);
+}
+
+function drawSky(pal){
+  // subtle gradient using two rects
+  ctx.fillStyle=pal.skyH||pal.sky;
+  ctx.fillRect(0,0,W,40);
+  ctx.fillStyle=pal.sky;
+  ctx.fillRect(0,40,W,GROUND_Y-40);
+}
+
+function drawBackground(pal,castleOff){
+  drawSky(pal);
+  drawCastle(pal,castleOff);
+  for(const b of bats) drawSprite(b.frame===0?BAT0:BAT1,b.x,b.y);
+  drawGround(pal);
+}
+
+// ─── F: PLAYER ────────────────────────────────────────────────────────────────
+const player={
+  x:74, y:GROUND_Y-PLAYER_H,
+  vx:0, vy:0,
+  onGround:true,
+  facing:1,
+  anim:ANIM_IDLE,
+  animFrame:0,
+  animTimer:0,
+};
+
+function setAnim(a){
+  if(player.anim===a) return;
+  player.anim=a; player.animFrame=0; player.animTimer=0;
+}
+
+function tickPlayerAnim(dt){
+  player.animTimer+=dt;
+  const interval=1000/player.anim.fps;
+  if(player.animTimer>=interval){
+    player.animTimer-=interval;
+    player.animFrame=(player.animFrame+1)%player.anim.frames.length;
+  }
+}
+
+function drawPlayer(){
+  const frame=player.anim.frames[player.animFrame];
+  if(player.facing>=0) drawSprite(frame,player.x,player.y);
+  else drawSpriteFlip(frame,player.x,player.y,PLAYER_W);
+}
+
+// ─── G: LEVEL SYSTEM ──────────────────────────────────────────────────────────
+let currentLevel=1;
+let castleOffX=0;
+
+const trans={active:false,dir:'right',prog:0,fromLvl:1,toLvl:2,entryX:0};
+
+function getLvlPal(lvl){return LEVEL_PAL[(lvl-1)%LEVEL_PAL.length];}
+
+function startTransition(dir){
+  if(trans.active) return;
+  trans.active=true;
+  trans.dir=dir;
+  trans.prog=0;
+  trans.fromLvl=currentLevel;
+  trans.toLvl=dir==='right'
+    ?((currentLevel%MAX_LEVELS)+1)
+    :((currentLevel-2+MAX_LEVELS)%MAX_LEVELS+1);
+  trans.entryX=dir==='right'?4:W-PLAYER_W-4;
+  gameState='TRANSITION';
+  sfxTransition(dir);
+}
+
+function updateTransition(){
+  trans.prog+=0.045;
+  if(trans.prog>=1){
+    trans.prog=1;
+    currentLevel=trans.toLvl;
+    player.x=trans.entryX;
+    player.vx=0;
+    castleOffX=0;
+    gameState='PLAYING';
+    trans.active=false;
+  }
+}
+
+function renderTransition(){
+  const p=easeInOut(trans.prog);
+  const d=trans.dir==='right'?-1:1;
+  const off=Math.round(p*W);
+  // draw outgoing
+  ctx.save(); ctx.translate(d*off,0);
+  drawSceneForLevel(trans.fromLvl,0);
+  drawPlayer();
+  ctx.restore();
+  // draw incoming
+  ctx.save(); ctx.translate(d*off+d*-W,0);
+  drawSceneForLevel(trans.toLvl,0);
+  ctx.restore();
+}
+
+function easeInOut(t){return t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;}
+
+function drawSceneForLevel(lvl,coff){
+  drawBackground(getLvlPal(lvl),coff);
+}
+
+// ─── H: GAME STATE ────────────────────────────────────────────────────────────
+let gameState='TITLE';
+let titleBlink=0, titleBlinkOn=true;
+
+function drawHUD(){
+  ctx.fillStyle='rgba(0,0,0,0.45)';
+  ctx.fillRect(0,0,W,9);
+  drawText('AURA',2,2,'#f0a0c0');
+  const lvlStr='LVL:'+currentLevel;
+  drawText(lvlStr,W-lvlStr.length*5-2,2,'#c0e0ff');
+  const palName=getLvlPal(currentLevel).name||'';
+  drawText(palName,Math.floor((W-palName.length*5)/2),2,'#a0c0a0');
+}
+
+function renderTitle(){
+  drawBackground(getLvlPal(1),0);
+  // dark overlay
+  ctx.fillStyle='rgba(0,0,0,0.5)';
+  ctx.fillRect(0,0,W,H);
+  // title box
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(20,30,120,50);
+  ctx.fillStyle='#f0a0c0';
+  ctx.fillRect(20,30,120,1);
+  ctx.fillRect(20,79,120,1);
+  // big AURA — each char is 7px wide, 9 tall, 4 chars + 3 gaps(2px)
+  // total = 4*7+3*2 = 34px wide, center in 120 -> x=20+(120-34)/2=20+43=63
+  drawTitle(50,42,'#f0a0c0');
+  // subtitle line
+  drawText('ADVENTURE',34,56,'#c0d0ff');
+  // blink text
+  if(titleBlinkOn) drawText('PRESS ANY KEY',18,68,'#ffffff');
+}
+
+function renderPlaying(){
+  drawBackground(getLvlPal(currentLevel),castleOffX);
+  drawPlayer();
+  drawHUD();
+}
+
+function renderGame(){
+  ctx.clearRect(0,0,W,H);
+  switch(gameState){
+    case 'TITLE': renderTitle(); break;
+    case 'PLAYING': renderPlaying(); break;
+    case 'TRANSITION':
+      renderTransition();
+      drawHUD();
+      break;
+  }
+}
+
+function updateTitle(dt){
+  titleBlink+=dt;
+  if(titleBlink>500){titleBlink=0;titleBlinkOn=!titleBlinkOn;}
+  updateBats(dt);
+}
+
+function updatePlaying(dt){
+  // horizontal
+  if(keys.ArrowLeft){player.vx=-WALK_SPEED;player.facing=-1;}
+  else if(keys.ArrowRight){player.vx=WALK_SPEED;player.facing=1;}
+  else {if(player.onGround) player.vx*=FRICTION; else player.vx*=0.92;}
+
+  // gravity
+  player.vy+=GRAVITY;
+  player.x+=player.vx;
+  player.y+=player.vy;
+
+  // ground
+  if(player.y>=GROUND_Y-PLAYER_H){
+    player.y=GROUND_Y-PLAYER_H;
+    player.vy=0;
+    player.onGround=true;
+  } else {
+    player.onGround=false;
+  }
+
+  // anim state
+  if(!player.onGround) setAnim(ANIM_JUMP);
+  else if(Math.abs(player.vx)>0.15) setAnim(ANIM_WALK);
+  else setAnim(ANIM_IDLE);
+
+  tickPlayerAnim(dt);
+  updateBats(dt);
+
+  // parallax castle
+  castleOffX+=player.vx*0.06;
+
+  // level transition
+  if(player.x+PLAYER_W<0) startTransition('left');
+  else if(player.x>W) startTransition('right');
+}
+
+// ─── I: INPUT ─────────────────────────────────────────────────────────────────
+const keys={};
+document.addEventListener('keydown',e=>{
+  if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space'].includes(e.code)) e.preventDefault();
+  if(!keys[e.code]){
+    // first press actions
+    if(gameState==='TITLE'){
+      initAudio();
+      if(audioCtx) nextNoteTime=audioCtx.currentTime+0.1;
+      gameState='PLAYING';
+      player.x=74; player.y=GROUND_Y-PLAYER_H;
+      player.vx=0; player.vy=0;
+    }
+    if(e.code==='Space'&&gameState==='PLAYING'&&player.onGround){
+      player.vy=JUMP_FORCE;
+      player.onGround=false;
+      sfxJump();
+    }
+  }
+  keys[e.code]=true;
+});
+document.addEventListener('keyup',e=>{keys[e.code]=false;});
+
+// ─── J: GAME LOOP ─────────────────────────────────────────────────────────────
+let lastTime=0;
+const STEP=16.667;
+let acc=0;
+
+function loop(ts){
+  const dt=Math.min(ts-lastTime,100);
+  lastTime=ts;
+  acc+=dt;
+  while(acc>=STEP){
+    switch(gameState){
+      case 'TITLE':      updateTitle(STEP);     break;
+      case 'PLAYING':    updatePlaying(STEP);   break;
+      case 'TRANSITION': updateTransition();    break;
+    }
+    acc-=STEP;
+  }
+  scheduleMusicChunk();
+  renderGame();
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(t=>{lastTime=t;requestAnimationFrame(loop);});
+</script>
+</body>
+</html>
