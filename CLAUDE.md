@@ -22,16 +22,28 @@ open tictactoe.html
 
 No build step, no server required.
 
-## Deployment
+## Git Workflow
 
-The site is live at **https://cassmcxi.github.io/aura-game/** via GitHub Pages (serving from `main` branch root). Every push to `main` deploys automatically.
+**Commit and push after every meaningful change.** This project uses GitHub as the source of truth — always keep it up to date so work is never lost and can always be reverted.
 
-After any change:
+- Commit after completing any feature, fix, or improvement — don't batch unrelated changes
+- Push to `main` immediately after each commit
+- Write clean, specific commit messages that describe *what changed and why*
+
 ```bash
 git add <file>
-git commit -m "description of change"
+git commit -m "short description of what changed"
 git push
 ```
+
+Good commit message examples:
+- `Add enemy spawn system to AURA level 3`
+- `Fix player sprite flipping when jumping left`
+- `Update landing page card descriptions`
+
+## Deployment
+
+The site is live at **https://cassmcxi.github.io/aura-game/** via GitHub Pages (serving from `main` branch root). Every push to `main` deploys automatically — no extra steps needed.
 
 ## AURA Architecture (`aura.html`)
 
